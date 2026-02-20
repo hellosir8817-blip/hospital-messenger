@@ -1,36 +1,52 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+from datetime import datetime
 
-# 1. 앱 페이지 설정
-st.set_page_config(page_title="병원 메신저", page_icon="🏥")
+# 페이지 설정
+st.set_page_config(page_title="병원 보안 메신저", layout="wide")
 
-# 2. 제목
+# 구글 시트 연결
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# 데이터 불러오기 함수
+def load_data():
+    return conn.read(ttl=0) # 실시간을 위해 캐시를 0으로 설정
+
 st.title("🏥 병원 스마트 메신저")
-st.caption("병원 업무 효율화를 위한 실시간 소통 도구")
 
-# 3. 사용자 정보 설정 (사이드바)
+# 사이드바 설정
 with st.sidebar:
     st.header("👤 내 정보")
-    user_name = st.text_input("성함 또는 사번", value="홍길동")
-    
-    # '행정'에서 '행정부'로 수정되었습니다.
-    dept = st.selectbox("소속 부서", [
-        "진료부", "간호부", "행정부", "재활센터", 
-        "영양실", "QPS", "감염", "임상병리", "영상의학과"
-    ])
+    user_id = st.text_input("사번 또는 성함", value="홍길동")
+    dept = st.selectbox("소속 부서", ["진료부", "간호부", "행정부", "재활센터", "영양실", "QPS", "감염", "임상병리", "영상의학과"])
     st.write("---")
-    st.caption("양지 AI 스터디 그룹 제작")
+    target_user = st.text_input("수신자 (전체는 '전체' 입력)", value="전체")
 
-# 4. 채팅 화면 로직
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# 메시지 읽어오기
+df = load_data()
 
-# 기존 메시지 표시
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.write(f"**{msg['user']} ({msg['dept']})**")
-        st.write(msg["content"])
+# 채팅창 구현 (나에게 온 메시지나 전체 메시지만 필터링)
+for index, row in df.iterrows():
+    if row['receiver'] == "전체" or row['receiver'] == user_id or row['sender'] == user_id:
+        with st.chat_message("user" if row['sender'] == user_id else "assistant"):
+            st.write(f"**[{row['sender_dept']}] {row['sender']}** → **{row['receiver']}**")
+            st.write(row['content'])
+            st.caption(str(row['date']))
 
 # 메시지 입력
 if prompt := st.chat_input("메시지를 입력하세요..."):
-    st.session_state.messages.append({"role": "user", "user": user_name, "dept": dept, "content": prompt})
+    new_data = pd.DataFrame([{
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "sender": user_id,
+        "sender_dept": dept,
+        "receiver": target_user,
+        "receiver_dept": "전체",
+        "content": prompt,
+        "is_ad": "No",
+        "file_url": ""
+    }])
+    # 시트에 저장
+    updated_df = pd.concat([df, new_data], ignore_index=True)
+    conn.update(data=updated_df)
     st.rerun()
